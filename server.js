@@ -7,28 +7,24 @@ const app = express();
 const port = process.env.PORT || 10000;
 const sessionDir = process.env.SESSION_DIR || path.join(__dirname, 'whatsapp-session');
 
-// FUNGSI PEMBERSIH LOCK: Menghapus file lock agar tidak error "already running"
-function clearBrowserLock() {
-  const lockFiles = [
-    path.join(sessionDir, 'session-wa-check', 'SingletonLock'),
-    path.join(sessionDir, 'session-wa-check', 'SingletonCookie'),
-    path.join(sessionDir, 'session-wa-check', 'SingletonSocket')
-  ];
-  
-  lockFiles.forEach(file => {
-    if (fs.existsSync(file)) {
-      try {
-        fs.unlinkSync(file);
-        console.log(`✓ File lock dihapus: ${path.basename(file)}`);
-      } catch (e) {
-        console.log(`! Tidak bisa hapus lock: ${e.message}`);
-      }
+// FUNGSI PEMBERSIH OTOMATIS (Mencegah error 'Already Running')
+function forceCleanup() {
+    const dir = path.join(sessionDir, 'session-wa-check');
+    if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        files.forEach(file => {
+            if (file.includes('Singleton')) {
+                try {
+                    fs.unlinkSync(path.join(dir, file));
+                    console.log('✓ Menghapus file lock:', file);
+                } catch (e) {}
+            }
+        });
     }
-  });
 }
 
-// Jalankan pembersihan sebelum inisialisasi
-clearBrowserLock();
+// Jalankan pembersihan saat startup
+forceCleanup();
 
 const client = new Client({
   authStrategy: new LocalAuth({
@@ -38,7 +34,7 @@ const client = new Client({
   puppeteer: {
     headless: true,
     args: [
-      '--no-sandbox',
+      '--no-sandbox', 
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--no-first-run',
@@ -48,22 +44,8 @@ const client = new Client({
   },
 });
 
-let isClientReady = false;
-let clientInitError = null;
+client.on('ready', () => console.log('✓ WhatsApp Client SIAP!'));
+client.initialize();
 
-client.on('ready', () => {
-  console.log('✓ WhatsApp Client SIAP!');
-  isClientReady = true;
-});
-
-client.on('error', (err) => console.error('Error:', err.message));
-
-// Inisialisasi
-client.initialize().catch(err => {
-    console.error('Gagal init:', err.message);
-    // Jika masih gagal, coba clear lock dan restart setelah 5 detik
-    setTimeout(() => process.exit(1), 5000); 
-});
-
-app.get('/api/status', (req, res) => res.json({ ready: isClientReady }));
+app.get('/api/status', (req, res) => res.json({ ready: client.info !== undefined }));
 app.listen(port, () => console.log(`Server running on ${port}`));
